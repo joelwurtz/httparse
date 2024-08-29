@@ -113,7 +113,7 @@ fn uri(c: &mut Criterion) {
         .throughput(Throughput::Bytes(input.len() as u64))
         .bench_function(name, |b| b.iter(|| {
             let mut b = httparse::_benchable::Bytes::new(black_box(input));
-            httparse::_benchable::parse_uri(&mut b).unwrap()
+            httparse::_benchable::parse_uri(&mut b, false).unwrap()
         }));
     }
 

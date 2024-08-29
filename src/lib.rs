@@ -90,9 +90,32 @@ static URI_MAP: [bool; 256] = byte_map![
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
 
+static URI_NON_COMPLIANT_MAP: [bool; 256] = byte_map![
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+];
+
 #[inline]
-pub(crate) fn is_uri_token(b: u8) -> bool {
-    URI_MAP[b as usize]
+pub(crate) fn is_uri_token(b: u8, allow_non_compliant: bool) -> bool {
+    if allow_non_compliant {
+        URI_NON_COMPLIANT_MAP[b as usize]
+    } else {
+        URI_MAP[b as usize]
+    }
 }
 
 static HEADER_NAME_MAP: [bool; 256] = byte_map![
@@ -260,6 +283,7 @@ pub struct ParserConfig {
     allow_multiple_spaces_in_request_line_delimiters: bool,
     allow_multiple_spaces_in_response_status_delimiters: bool,
     allow_space_before_first_header_name: bool,
+    allow_rfc3986_non_compliant_path: bool,
     ignore_invalid_headers_in_responses: bool,
     ignore_invalid_headers_in_requests: bool,
 }
@@ -539,7 +563,7 @@ impl<'h, 'b> Request<'h, 'b> {
         if config.allow_multiple_spaces_in_request_line_delimiters {
             complete!(skip_spaces(&mut bytes));
         }
-        self.path = Some(complete!(parse_uri(&mut bytes)));
+        self.path = Some(complete!(parse_uri(&mut bytes, config.allow_rfc3986_non_compliant_path)));
         if config.allow_multiple_spaces_in_request_line_delimiters {
             complete!(skip_spaces(&mut bytes));
         }
@@ -952,9 +976,9 @@ fn parse_token<'a>(bytes: &mut Bytes<'a>) -> Result<&'a str> {
 #[doc(hidden)]
 #[allow(missing_docs)]
 // WARNING: Exported for internal benchmarks, not fit for public consumption
-pub fn parse_uri<'a>(bytes: &mut Bytes<'a>) -> Result<&'a str> {
+pub fn parse_uri<'a>(bytes: &mut Bytes<'a>, allow_non_compliant: bool) -> Result<&'a str> {
     let start = bytes.pos();
-    simd::match_uri_vectored(bytes);
+    simd::match_uri_vectored(bytes, allow_non_compliant);
     let end = bytes.pos();
 
     if next!(bytes) == b' ' {
@@ -2675,5 +2699,33 @@ mod tests {
         assert_eq!(response.headers.len(), 1);
         assert_eq!(response.headers[0].name, "foo");
         assert_eq!(response.headers[0].value, &b"bar"[..]);
+    }
+
+    #[test]
+    fn test_rfc3986_non_compliant_path_ko() {
+        let mut headers = [EMPTY_HEADER; 1];
+        let mut request = Request::new(&mut headers[..]);
+
+        let result = crate::ParserConfig::default().parse_request(&mut request, b"GET /test?post=I\xE2\x80\x99msorryIforkedyou HTTP/1.1\r\nHost: example.org\r\n\r\n");
+
+        assert_eq!(result, Err(crate::Error::Token));
+    }
+
+    #[test]
+    fn test_rfc3986_non_compliant_path_ok() {
+        let mut headers = [EMPTY_HEADER; 1];
+        let mut request = Request::new(&mut headers[..]);
+        let mut config = crate::ParserConfig::default();
+        config.allow_rfc3986_non_compliant_path = true;
+
+        let result = config.parse_request(&mut request, b"GET /test?post=I\xE2\x80\x99msorryIforkedyou HTTP/1.1\r\nHost: example.org\r\n\r\n");
+
+        assert_eq!(result, Ok(Status::Complete(67)));
+        assert_eq!(request.version.unwrap(), 1);
+        assert_eq!(request.method.unwrap(), "GET");
+        assert_eq!(request.path.unwrap(), "/test?post=I’msorryIforkedyou");
+        assert_eq!(request.headers.len(), 1);
+        assert_eq!(request.headers[0].name, "Host");
+        assert_eq!(request.headers[0].value, &b"example.org"[..]);
     }
 }

@@ -1,16 +1,21 @@
 use crate::iter::Bytes;
 
 #[target_feature(enable = "sse4.2")]
-pub unsafe fn match_uri_vectored(bytes: &mut Bytes) {
+pub unsafe fn match_uri_vectored(bytes: &mut Bytes, allow_non_compliant: bool) {
     while bytes.as_ref().len() >= 16 {
-        let advance = match_url_char_16_sse(bytes.as_ref());
+        let advance = if allow_non_compliant {
+            match_url_char_non_compliant_16_sse(bytes.as_ref())
+        } else {
+            match_url_char_16_sse(bytes.as_ref())
+        };
+
         bytes.advance(advance);
 
         if advance != 16 {
             return;
         }
     }
-    super::swar::match_uri_vectored(bytes);
+    super::swar::match_uri_vectored(bytes, allow_non_compliant);
 }
 
 #[inline(always)]
@@ -59,6 +64,33 @@ unsafe fn match_url_char_16_sse(buf: &[u8]) -> usize {
     let r = _mm_movemask_epi8(v) as u16;
 
     r.trailing_zeros() as usize
+}
+
+#[inline(always)]
+#[allow(non_snake_case)]
+unsafe fn match_url_char_non_compliant_16_sse(buf: &[u8]) -> usize {
+    debug_assert!(buf.len() >= 16);
+
+    #[cfg(target_arch = "x86")]
+    use core::arch::x86::*;
+    #[cfg(target_arch = "x86_64")]
+    use core::arch::x86_64::*;
+
+    let ptr = buf.as_ptr();
+
+    // %x21-%x7e %x80-%xff
+    let DEL: __m128i = _mm_set1_epi8(0x7f);
+    let LOW: __m128i = _mm_set1_epi8(0x21);
+
+    let dat = _mm_lddqu_si128(ptr as *const _);
+    // unsigned comparison dat >= LOW
+    let low = _mm_cmpeq_epi8(_mm_max_epu8(dat, LOW), dat);
+    let del = _mm_cmpeq_epi8(dat, DEL);
+    let bit = _mm_andnot_si128(del, low);
+    let res = _mm_movemask_epi8(bit) as u16;
+
+    // TODO: use .trailing_ones() once MSRV >= 1.46
+    (!res).trailing_zeros() as usize
 }
 
 #[target_feature(enable = "sse4.2")]
@@ -111,11 +143,11 @@ fn sse_code_matches_uri_chars_table() {
 
     #[allow(clippy::undocumented_unsafe_blocks)]
     unsafe {
-        assert!(byte_is_allowed(b'_', match_uri_vectored));
+        assert!(byte_is_allowed(b'_', |b| match_uri_vectored(b, false)));
 
         for (b, allowed) in crate::URI_MAP.iter().cloned().enumerate() {
             assert_eq!(
-                byte_is_allowed(b as u8, match_uri_vectored), allowed,
+                byte_is_allowed(b as u8, |b| match_uri_vectored(b, false)), allowed,
                 "byte_is_allowed({:?}) should be {:?}", b, allowed,
             );
         }

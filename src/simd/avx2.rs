@@ -2,9 +2,15 @@ use crate::iter::Bytes;
 
 #[inline]
 #[target_feature(enable = "avx2", enable = "sse4.2")]
-pub unsafe fn match_uri_vectored(bytes: &mut Bytes) {
+pub unsafe fn match_uri_vectored(bytes: &mut Bytes, allow_non_compliant: bool) {
     while bytes.as_ref().len() >= 32 {
-        let advance = match_url_char_32_avx(bytes.as_ref());
+
+        let advance = if allow_non_compliant {
+            match_url_char_non_compliant_32_avx(bytes.as_ref())
+        } else {
+            match_url_char_32_avx(bytes.as_ref())
+        };
+
         bytes.advance(advance);
 
         if advance != 32 {
@@ -12,7 +18,7 @@ pub unsafe fn match_uri_vectored(bytes: &mut Bytes) {
         }
     }
     // do both, since avx2 only works when bytes.len() >= 32
-    super::sse42::match_uri_vectored(bytes)
+    super::sse42::match_uri_vectored(bytes, allow_non_compliant)
 }
 
 #[inline(always)]
@@ -54,6 +60,33 @@ unsafe fn match_url_char_32_avx(buf: &[u8]) -> usize {
     let r = _mm256_movemask_epi8(v) as u32;
 
     r.trailing_zeros() as usize
+}
+
+#[inline(always)]
+#[allow(non_snake_case, overflowing_literals)]
+#[allow(unused)]
+unsafe fn match_url_char_non_compliant_32_avx(buf: &[u8]) -> usize {
+    debug_assert!(buf.len() >= 32);
+
+    #[cfg(target_arch = "x86")]
+    use core::arch::x86::*;
+    #[cfg(target_arch = "x86_64")]
+    use core::arch::x86_64::*;
+
+    let ptr = buf.as_ptr();
+
+    // %x21-%x7e %x80-%xff
+    let DEL: __m256i = _mm256_set1_epi8(0x7f);
+    let LOW: __m256i = _mm256_set1_epi8(0x21);
+
+    let dat = _mm256_lddqu_si256(ptr as *const _);
+    // unsigned comparison dat >= LOW
+    let low = _mm256_cmpeq_epi8(_mm256_max_epu8(dat, LOW), dat);
+    let del = _mm256_cmpeq_epi8(dat, DEL);
+    let bit = _mm256_andnot_si256(del, low);
+    let res = _mm256_movemask_epi8(bit) as u32;
+    // TODO: use .trailing_ones() once MSRV >= 1.46
+    (!res).trailing_zeros() as usize
 }
 
 #[target_feature(enable = "avx2", enable = "sse4.2")]
@@ -107,11 +140,11 @@ fn avx2_code_matches_uri_chars_table() {
 
     #[allow(clippy::undocumented_unsafe_blocks)]
     unsafe {
-        assert!(byte_is_allowed(b'_', match_uri_vectored));
+        assert!(byte_is_allowed(b'_', |b| match_uri_vectored(b, false)));
 
         for (b, allowed) in crate::URI_MAP.iter().cloned().enumerate() {
             assert_eq!(
-                byte_is_allowed(b as u8, match_uri_vectored), allowed,
+                byte_is_allowed(b as u8, |b| match_uri_vectored(b, false)), allowed,
                 "byte_is_allowed({:?}) should be {:?}", b, allowed,
             );
         }

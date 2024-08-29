@@ -7,7 +7,7 @@ const BLOCK_SIZE: usize = core::mem::size_of::<usize>();
 type ByteBlock = [u8; BLOCK_SIZE];
 
 #[inline]
-pub fn match_uri_vectored(bytes: &mut Bytes, allow_non_compliant: bool) {
+pub fn match_uri_vectored(bytes: &mut Bytes) {
     loop {
         if let Some(bytes8) = bytes.peek_n::<ByteBlock>(BLOCK_SIZE) {
             let n = match_uri_char_8_swar(bytes8);
@@ -21,7 +21,7 @@ pub fn match_uri_vectored(bytes: &mut Bytes, allow_non_compliant: bool) {
             }
         }
         if let Some(b) = bytes.peek() {
-            if is_uri_token(b, allow_non_compliant) {
+            if is_uri_token(b) {
                 // SAFETY: using peek to retrieve the byte ensures that there is at least 1 more byte
                 // in bytes, so calling advance is safe.
                 unsafe {

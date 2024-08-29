@@ -59,46 +59,18 @@ fn is_token(b: u8) -> bool {
     b > 0x1F && b < 0x7F
 }
 
-// ASCII codes to accept URI string.
-// i.e. A-Z a-z 0-9 !#$%&'*+-._();:@=,/?[]~^
-// TODO: Make a stricter checking for URI string?
 static URI_MAP: [bool; 256] = byte_map![
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 //  \0                            \n
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 //  commands
     0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-//  \w !  "  #  $  %  &  '  (  )  *  +  ,  -  .  /
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1,
-//  0  1  2  3  4  5  6  7  8  9  :  ;  <  =  >  ?
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-//  @  A  B  C  D  E  F  G  H  I  J  K  L  M  N  O
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-//  P  Q  R  S  T  U  V  W  X  Y  Z  [  \  ]  ^  _
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-//  `  a  b  c  d  e  f  g  h  i  j  k  l  m  n  o
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
 //  p  q  r  s  t  u  v  w  x  y  z  {  |  }  ~  del
-//   ====== Extended ASCII (aka. obs-text) ======
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-];
-
-static URI_NON_COMPLIANT_MAP: [bool; 256] = byte_map![
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -110,12 +82,8 @@ static URI_NON_COMPLIANT_MAP: [bool; 256] = byte_map![
 ];
 
 #[inline]
-pub(crate) fn is_uri_token(b: u8, allow_non_compliant: bool) -> bool {
-    if allow_non_compliant {
-        URI_NON_COMPLIANT_MAP[b as usize]
-    } else {
-        URI_MAP[b as usize]
-    }
+pub(crate) fn is_uri_token(b: u8) -> bool {
+    URI_MAP[b as usize]
 }
 
 static HEADER_NAME_MAP: [bool; 256] = byte_map![
@@ -283,7 +251,6 @@ pub struct ParserConfig {
     allow_multiple_spaces_in_request_line_delimiters: bool,
     allow_multiple_spaces_in_response_status_delimiters: bool,
     allow_space_before_first_header_name: bool,
-    allow_rfc3986_non_compliant_path: bool,
     ignore_invalid_headers_in_responses: bool,
     ignore_invalid_headers_in_requests: bool,
 }
@@ -563,7 +530,7 @@ impl<'h, 'b> Request<'h, 'b> {
         if config.allow_multiple_spaces_in_request_line_delimiters {
             complete!(skip_spaces(&mut bytes));
         }
-        self.path = Some(complete!(parse_uri(&mut bytes, config.allow_rfc3986_non_compliant_path)));
+        self.path = Some(complete!(parse_uri(&mut bytes)));
         if config.allow_multiple_spaces_in_request_line_delimiters {
             complete!(skip_spaces(&mut bytes));
         }
@@ -976,9 +943,9 @@ fn parse_token<'a>(bytes: &mut Bytes<'a>) -> Result<&'a str> {
 #[doc(hidden)]
 #[allow(missing_docs)]
 // WARNING: Exported for internal benchmarks, not fit for public consumption
-pub fn parse_uri<'a>(bytes: &mut Bytes<'a>, allow_non_compliant: bool) -> Result<&'a str> {
+pub fn parse_uri<'a>(bytes: &mut Bytes<'a>) -> Result<&'a str> {
     let start = bytes.pos();
-    simd::match_uri_vectored(bytes, allow_non_compliant);
+    simd::match_uri_vectored(bytes);
     let end = bytes.pos();
 
     if next!(bytes) == b' ' {
@@ -2185,7 +2152,7 @@ mod tests {
         assert_eq!(result, Err(crate::Error::Token));
     }
 
-    static REQUEST_WITH_MULTIPLE_SPACES_AND_BAD_PATH: &[u8] = b"GET   /foo>ohno HTTP/1.1\r\n\r\n";
+    static REQUEST_WITH_MULTIPLE_SPACES_AND_BAD_PATH: &[u8] = b"GET   /foo ohno HTTP/1.1\r\n\r\n";
 
     #[test]
     fn test_request_with_multiple_spaces_and_bad_path() {
@@ -2194,7 +2161,7 @@ mod tests {
         let result = crate::ParserConfig::default()
             .allow_multiple_spaces_in_request_line_delimiters(true)
             .parse_request(&mut request, REQUEST_WITH_MULTIPLE_SPACES_AND_BAD_PATH);
-        assert_eq!(result, Err(crate::Error::Token));
+        assert_eq!(result, Err(crate::Error::Version));
     }
 
     static RESPONSE_WITH_SPACES_IN_CODE: &[u8] = b"HTTP/1.1 99 200 OK\r\n\r\n";
@@ -2702,23 +2669,11 @@ mod tests {
     }
 
     #[test]
-    fn test_rfc3986_non_compliant_path_ko() {
+    fn test_rfc3986_non_compliant_path() {
         let mut headers = [EMPTY_HEADER; 1];
         let mut request = Request::new(&mut headers[..]);
 
         let result = crate::ParserConfig::default().parse_request(&mut request, b"GET /test?post=I\xE2\x80\x99msorryIforkedyou HTTP/1.1\r\nHost: example.org\r\n\r\n");
-
-        assert_eq!(result, Err(crate::Error::Token));
-    }
-
-    #[test]
-    fn test_rfc3986_non_compliant_path_ok() {
-        let mut headers = [EMPTY_HEADER; 1];
-        let mut request = Request::new(&mut headers[..]);
-        let mut config = crate::ParserConfig::default();
-        config.allow_rfc3986_non_compliant_path = true;
-
-        let result = config.parse_request(&mut request, b"GET /test?post=I\xE2\x80\x99msorryIforkedyou HTTP/1.1\r\nHost: example.org\r\n\r\n");
 
         assert_eq!(result, Ok(Status::Complete(67)));
         assert_eq!(request.version.unwrap(), 1);
